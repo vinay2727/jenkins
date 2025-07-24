@@ -2,24 +2,15 @@ pipeline {
     agent any
 
     environment {
-        K8S_YAML = 'k8s-deployment.yaml'
         KUBECONFIG = '/c/Users/rbih4/.kube/config'
     }
 
-    stages {
-        stage('Setup Parameters') {
-            steps {
-                script {
-                    properties([
-                        parameters([
-                            string(name: 'REPO_NAME', defaultValue: 'pan-service', description: 'GitHub repo name'),
-                            choice(name: 'ENVIRONMENT', choices: ['dev', 'qa', 'prod'], description: 'Target environment/namespace')
-                        ])
-                    ])
-                }
-            }
-        }
+    parameters {
+        string(name: 'REPO_NAME', defaultValue: 'pan-service', description: 'GitHub repo name')
+        choice(name: 'ENVIRONMENT', choices: ['dev', 'qa', 'prod'], description: 'Target environment/namespace')
+    }
 
+    stages {
         stage('Set Vars') {
             steps {
                 script {
@@ -29,25 +20,42 @@ pipeline {
             }
         }
 
-        stage('Checkout Source') {
+        stage('Checkout App Source') {
             steps {
                 git url: "https://github.com/vinay2727/${params.REPO_NAME}.git", branch: 'main'
             }
         }
 
+        stage('Checkout Jenkins Config') {
+            steps {
+                dir('central-config') {
+                    git url: 'https://github.com/vinay2727/jenkins.git', branch: 'main'
+                }
+            }
+        }
+
         stage('Maven Build') {
+            when {
+                expression { params.ENVIRONMENT == 'qa' }
+            }
             steps {
                 sh 'mvn clean package -DskipTests'
             }
         }
 
         stage('Docker Build') {
+            when {
+                expression { params.ENVIRONMENT == 'qa' }
+            }
             steps {
-                sh "docker build -t ${DOCKERHUB_IMAGE}:${TAG} ."
+                sh "docker build -f central-config/Dockerfile -t ${DOCKERHUB_IMAGE}:${TAG} ."
             }
         }
 
         stage('Push to DockerHub') {
+            when {
+                expression { params.ENVIRONMENT == 'qa' }
+            }
             steps {
                 withCredentials([usernamePassword(credentialsId: 'dockerhub-creds', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
                     sh '''
@@ -65,12 +73,11 @@ pipeline {
                     sh '''
                         echo "🔧 Setting KUBECONFIG..."
                         kubectl --kubeconfig=${KUBECONFIG} config use-context minikube || true
-
                         echo "🔍 Creating namespace if not present: ${ENVIRONMENT}..."
                         kubectl --kubeconfig=${KUBECONFIG} create namespace ${ENVIRONMENT} --dry-run=client -o yaml | kubectl apply -f -
 
                         echo "🚀 Deploying to namespace: ${ENVIRONMENT}..."
-                        sed "s|<IMAGE_TAG>|${TAG}|g; s|<REPO_NAME>|${REPO_NAME}|g; s|<ENV>|${ENVIRONMENT}|g" ${K8S_YAML} | \
+                        sed "s|<IMAGE_TAG>|${TAG}|g; s|<REPO_NAME>|${REPO_NAME}|g; s|<ENV>|${ENVIRONMENT}|g" central-config/k8s-deployment.yaml | \
                         kubectl --kubeconfig=${KUBECONFIG} apply -n ${ENVIRONMENT} -f -
                     '''
                 }
