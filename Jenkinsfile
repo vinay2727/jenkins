@@ -1,30 +1,49 @@
 pipeline {
     agent any
 
-    parameters {
-        string(name: 'REPO_NAME', defaultValue: 'pan-service', description: 'GitHub repo name')
-        choice(name: 'ENVIRONMENT', choices: ['qa', 'dev', 'prod'], description: 'Target environment/namespace')
-    }
-
     environment {
-        TAG = "${env.BUILD_NUMBER}"
-        DOCKERHUB_IMAGE = "drdocker108/${params.REPO_NAME}"
         K8S_YAML = 'k8s-deployment.yaml'
         KUBECONFIG = '/c/Users/rbih4/.kube/config'
     }
 
     stages {
-        stage('Checkout') {
+        stage('Setup Parameters') {
+            steps {
+                script {
+                    properties([
+                        parameters([
+                            string(name: 'REPO_NAME', defaultValue: 'pan-service', description: 'GitHub repo name'),
+                            choice(name: 'ENVIRONMENT', choices: ['dev', 'qa', 'prod'], description: 'Target environment/namespace')
+                        ])
+                    ])
+                }
+            }
+        }
+
+        stage('Set Vars') {
+            steps {
+                script {
+                    env.TAG = "${params.REPO_NAME}-${env.BUILD_NUMBER}"
+                    env.DOCKERHUB_IMAGE = "drdocker108/${params.REPO_NAME}"
+                }
+            }
+        }
+
+        stage('Checkout Source') {
             steps {
                 git url: "https://github.com/vinay2727/${params.REPO_NAME}.git", branch: 'main'
             }
         }
 
-        stage('Build Docker Image') {
+        stage('Maven Build') {
             steps {
-                script {
-                    sh "docker build -t ${DOCKERHUB_IMAGE}:${TAG} ."
-                }
+                sh 'mvn clean package -DskipTests'
+            }
+        }
+
+        stage('Docker Build') {
+            steps {
+                sh "docker build -t ${DOCKERHUB_IMAGE}:${TAG} ."
             }
         }
 
@@ -50,7 +69,7 @@ pipeline {
                         echo "🔍 Creating namespace if not present: ${ENVIRONMENT}..."
                         kubectl --kubeconfig=${KUBECONFIG} create namespace ${ENVIRONMENT} --dry-run=client -o yaml | kubectl apply -f -
 
-                        echo "🚀 Deploying to namespace: ${ENVIRONMENT}"
+                        echo "🚀 Deploying to namespace: ${ENVIRONMENT}..."
                         sed "s|<IMAGE_TAG>|${TAG}|g; s|<REPO_NAME>|${REPO_NAME}|g; s|<ENV>|${ENVIRONMENT}|g" ${K8S_YAML} | \
                         kubectl --kubeconfig=${KUBECONFIG} apply -n ${ENVIRONMENT} -f -
                     '''
