@@ -67,12 +67,33 @@ pipeline {
             }
         }
 
+        stage('Promote Image from QA to Prod') {
+            when {
+                expression { params.ENVIRONMENT == 'prod' }
+            }
+            steps {
+                withCredentials([usernamePassword(credentialsId: 'dockerhub-creds', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
+                    script {
+                        def qaTag = "${params.REPO_NAME}-${env.BUILD_NUMBER}" // Or dynamically determine if needed
+                        sh """
+                            echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
+                            docker pull ${DOCKERHUB_IMAGE}:${qaTag}
+                            docker tag ${DOCKERHUB_IMAGE}:${qaTag} ${DOCKERHUB_IMAGE}:${TAG}
+                            docker push ${DOCKERHUB_IMAGE}:${TAG}
+                            docker logout
+                        """
+                    }
+                }
+            }
+        }
+
         stage('Deploy to Minikube') {
             steps {
                 script {
                     sh '''
                         echo "🔧 Setting KUBECONFIG..."
                         kubectl --kubeconfig=${KUBECONFIG} config use-context minikube || true
+
                         echo "🔍 Creating namespace if not present: ${ENVIRONMENT}..."
                         kubectl --kubeconfig=${KUBECONFIG} create namespace ${ENVIRONMENT} --dry-run=client -o yaml | kubectl apply -f -
 
