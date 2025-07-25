@@ -3,6 +3,8 @@ pipeline {
 
     environment {
         KUBECONFIG = '/c/Users/rbih4/.kube/config'
+        CONFIG_REPO = 'https://github.com/vinay2727/jenkins.git'
+        CONFIG_BRANCH = 'main'
     }
 
     parameters {
@@ -16,6 +18,7 @@ pipeline {
                 script {
                     env.TAG = "${params.REPO_NAME}-${env.BUILD_NUMBER}"
                     env.DOCKERHUB_IMAGE = "drdocker108/${params.REPO_NAME}"
+                    env.SOURCE_TAG = "${params.REPO_NAME}-${env.BUILD_NUMBER}"
                 }
             }
         }
@@ -29,7 +32,7 @@ pipeline {
         stage('Checkout Jenkins Config') {
             steps {
                 dir('central-config') {
-                    git url: 'https://github.com/vinay2727/jenkins.git', branch: 'main'
+                    git url: "${CONFIG_REPO}", branch: "${CONFIG_BRANCH}"
                 }
             }
         }
@@ -43,22 +46,14 @@ pipeline {
             }
         }
 
-        stage('Docker Build') {
-            when {
-                expression { params.ENVIRONMENT == 'qa' }
-            }
-            steps {
-                sh "docker build -f central-config/Dockerfile -t ${DOCKERHUB_IMAGE}:${TAG} ."
-            }
-        }
-
-        stage('Push to DockerHub') {
+        stage('Docker Build & Push') {
             when {
                 expression { params.ENVIRONMENT == 'qa' }
             }
             steps {
                 withCredentials([usernamePassword(credentialsId: 'dockerhub-creds', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
                     sh '''
+                        docker build -f central-config/Dockerfile -t ${DOCKERHUB_IMAGE}:${TAG} .
                         echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
                         docker push ${DOCKERHUB_IMAGE}:${TAG}
                         docker logout
@@ -67,21 +62,22 @@ pipeline {
             }
         }
 
-        stage('Promote Image from QA to Prod') {
+        stage('Promote QA Image to Prod') {
             when {
                 expression { params.ENVIRONMENT == 'prod' }
             }
             steps {
                 withCredentials([usernamePassword(credentialsId: 'dockerhub-creds', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
                     script {
-                        def qaTag = "${params.REPO_NAME}-${env.BUILD_NUMBER}" // Or dynamically determine if needed
-                        sh """
+                        def qaTag = "${params.REPO_NAME}-${env.BUILD_NUMBER}"
+
+                        sh '''
                             echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
-                            docker pull ${DOCKERHUB_IMAGE}:${qaTag}
+                            docker pull ${DOCKERHUB_IMAGE}:${qaTag} || (echo "Image ${qaTag} not found in QA. Aborting." && exit 1)
                             docker tag ${DOCKERHUB_IMAGE}:${qaTag} ${DOCKERHUB_IMAGE}:${TAG}
                             docker push ${DOCKERHUB_IMAGE}:${TAG}
                             docker logout
-                        """
+                        '''
                     }
                 }
             }
