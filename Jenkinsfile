@@ -3,8 +3,6 @@ pipeline {
 
     environment {
         KUBECONFIG = '/c/Users/rbih4/.kube/config'
-        CONFIG_REPO = 'https://github.com/vinay2727/jenkins.git'
-        CONFIG_BRANCH = 'main'
     }
 
     parameters {
@@ -18,7 +16,6 @@ pipeline {
                 script {
                     env.TAG = "${params.REPO_NAME}-${env.BUILD_NUMBER}"
                     env.DOCKERHUB_IMAGE = "drdocker108/${params.REPO_NAME}"
-                    env.SOURCE_TAG = "${params.REPO_NAME}-${env.BUILD_NUMBER}"
                 }
             }
         }
@@ -32,7 +29,7 @@ pipeline {
         stage('Checkout Jenkins Config') {
             steps {
                 dir('central-config') {
-                    git url: "${CONFIG_REPO}", branch: "${CONFIG_BRANCH}"
+                    git url: 'https://github.com/vinay2727/jenkins.git', branch: 'main'
                 }
             }
         }
@@ -69,15 +66,29 @@ pipeline {
             steps {
                 withCredentials([usernamePassword(credentialsId: 'dockerhub-creds', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
                     script {
-                        def qaTag = "${params.REPO_NAME}-${env.BUILD_NUMBER}"
+                        echo "🔍 Getting image name from QA namespace pod..."
+                        def qaImage = sh(
+                            script: """
+                                kubectl --kubeconfig=${KUBECONFIG} get pods -n qa -l app=${params.REPO_NAME} -o jsonpath='{.items[0].spec.containers[0].image}'
+                            """,
+                            returnStdout: true
+                        ).trim()
 
-                        sh '''
+                        if (!qaImage) {
+                            error("❌ Could not retrieve image from QA namespace.")
+                        }
+
+                        echo "✅ Found QA image: ${qaImage}"
+
+                        def prodTag = "${params.REPO_NAME}-${env.BUILD_NUMBER}"
+
+                        sh """
                             echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
-                            docker pull ${DOCKERHUB_IMAGE}:${qaTag} || (echo "Image ${qaTag} not found in QA. Aborting." && exit 1)
-                            docker tag ${DOCKERHUB_IMAGE}:${qaTag} ${DOCKERHUB_IMAGE}:${TAG}
-                            docker push ${DOCKERHUB_IMAGE}:${TAG}
+                            docker pull ${qaImage}
+                            docker tag ${qaImage} ${DOCKERHUB_IMAGE}:${prodTag}
+                            docker push ${DOCKERHUB_IMAGE}:${prodTag}
                             docker logout
-                        '''
+                        """
                     }
                 }
             }
