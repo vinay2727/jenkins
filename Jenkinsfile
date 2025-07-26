@@ -7,79 +7,85 @@ def call() {
         }
 
         parameters {
-            string(name: 'REPO_NAME', defaultValue: 'pan-service', description: 'GitHub repo name')
-            string(name: 'BRANCH_NAME', defaultValue: 'release/1.0', description: 'Git branch name')
-            choice(name: 'ENVIRONMENT', choices: ['dev', 'qa', 'prod'], description: 'Target environment/namespace')
+            choice(name: 'ENVIRONMENT', choices: ['qa', 'prod'], description: 'Select the deployment environment')
         }
 
         stages {
-            stage('Checkout App Source') {
+            stage('Extract Context') {
                 steps {
-                    git url: "https://github.com/vinay2727/${params.REPO_NAME}.git", branch: "${params.BRANCH_NAME}"
+                    script {
+                        def jobParts = env.JOB_NAME.split('/')
+                        env.REPO_NAME = jobParts[1]
+                        env.BRANCH_NAME = jobParts[2]
+                        env.TAG = "${env.REPO_NAME}-${env.BUILD_NUMBER}"
+                        env.DOCKER_IMAGE = "drdocker108/${env.REPO_NAME}:${env.TAG}"
+                        echo "Repo: ${env.REPO_NAME}, Branch: ${env.BRANCH_NAME}, ENV: ${params.ENVIRONMENT}"
+                    }
                 }
             }
 
-            stage('Build (Only on QA)') {
+            stage('Checkout Source Repo') {
+                steps {
+                    git url: "https://github.com/vinay2727/${env.REPO_NAME}.git", branch: "${env.BRANCH_NAME}"
+                }
+            }
+
+            stage('Checkout Central Config') {
+                steps {
+                    dir('central-config') {
+                        git url: 'https://github.com/vinay2727/jenkins.git', branch: 'main'
+                    }
+                }
+            }
+
+            stage('Build & Push (only in QA)') {
                 when {
                     expression { params.ENVIRONMENT == 'qa' }
                 }
                 steps {
                     sh 'mvn clean package -DskipTests'
-                }
-            }
-
-            stage('Docker Build & Push (Only on QA)') {
-                when {
-                    expression { params.ENVIRONMENT == 'qa' }
-                }
-                steps {
-                    script {
-                        env.TAG = "${params.REPO_NAME}-${env.BUILD_NUMBER}"
-                        env.IMAGE_NAME = "drdocker108/${params.REPO_NAME}:${env.TAG}"
-
+                    withCredentials([usernamePassword(credentialsId: 'dockerhub-creds', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
                         sh """
-                            docker build -t ${IMAGE_NAME} .
+                            docker build -t ${env.DOCKER_IMAGE} .
                             echo "${DOCKER_PASS}" | docker login -u "${DOCKER_USER}" --password-stdin
-                            docker push ${IMAGE_NAME}
+                            docker push ${env.DOCKER_IMAGE}
                             docker logout
                         """
                     }
                 }
             }
 
-            stage('Promote from QA to Prod') {
+            stage('Fetch QA Image Tag (only in Prod)') {
                 when {
                     expression { params.ENVIRONMENT == 'prod' }
                 }
                 steps {
                     script {
-                        env.QA_TAG = "${params.REPO_NAME}-${env.BUILD_NUMBER}"
-                        env.NEW_TAG = "${params.REPO_NAME}-${env.BUILD_NUMBER}-prod"
-
-                        sh """
-                            echo "${DOCKER_PASS}" | docker login -u "${DOCKER_USER}" --password-stdin
-                            docker pull drdocker108/${params.REPO_NAME}:${QA_TAG} || exit 1
-                            docker tag drdocker108/${params.REPO_NAME}:${QA_TAG} drdocker108/${params.REPO_NAME}:${NEW_TAG}
-                            docker push drdocker108/${params.REPO_NAME}:${NEW_TAG}
-                            docker logout
-                        """
+                        def imageTag = sh(
+                            script: """
+                                kubectl --kubeconfig=${KUBECONFIG} -n qa get pods -l app=${env.REPO_NAME} -o jsonpath='{.items[0].spec.containers[0].image}'
+                            """,
+                            returnStdout: true
+                        ).trim()
+                        env.DOCKER_IMAGE = imageTag
+                        echo "Promoting image from QA: ${env.DOCKER_IMAGE}"
                     }
                 }
             }
 
-            stage('Deploy to Minikube') {
+            stage('Deploy to Kubernetes') {
                 steps {
-                    script {
-                        def tagToUse = (params.ENVIRONMENT == 'prod') ? "${params.REPO_NAME}-${env.BUILD_NUMBER}-prod" : "${params.REPO_NAME}-${env.BUILD_NUMBER}"
+                    sh """
+                        echo "Using context: minikube"
+                        kubectl --kubeconfig=${KUBECONFIG} config use-context minikube || true
 
-                        sh """
-                            kubectl --kubeconfig=${KUBECONFIG} config use-context minikube || true
-                            kubectl --kubeconfig=${KUBECONFIG} create namespace ${params.ENVIRONMENT} --dry-run=client -o yaml | kubectl apply -f -
+                        echo "Creating namespace ${params.ENVIRONMENT} if missing..."
+                        kubectl --kubeconfig=${KUBECONFIG} create namespace ${params.ENVIRONMENT} --dry-run=client -o yaml | kubectl apply -f -
 
-                            sed "s|<IMAGE_TAG>|${tagToUse}|g; s|<REPO_NAME>|${params.REPO_NAME}|g; s|<ENV>|${params.ENVIRONMENT}|g" central-config/k8s-deployment.yaml | \
-                            kubectl --kubeconfig=${KUBECONFIG} apply -n ${params.ENVIRONMENT} -f -
-                        """
-                    }
+                        echo "Deploying image: ${env.DOCKER_IMAGE} to ${params.ENVIRONMENT}"
+                        sed "s|<IMAGE_TAG>|${env.DOCKER_IMAGE}|g; s|<REPO_NAME>|${env.REPO_NAME}|g; s|<ENV>|${params.ENVIRONMENT}|g" central-config/k8s-deployment.yaml | \
+                        kubectl --kubeconfig=${KUBECONFIG} apply -n ${params.ENVIRONMENT} -f -
+                    """
                 }
             }
         }
