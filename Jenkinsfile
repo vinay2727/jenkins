@@ -11,34 +11,35 @@ def call() {
         }
 
         stages {
-            stage('Extract Context') {
+            stage('Prepare') {
                 steps {
                     script {
-                        def jobParts = env.JOB_NAME.split('/')
-                        env.REPO_NAME = jobParts[1]
-                        env.BRANCH_NAME = jobParts[2]
+                        def parts = env.JOB_NAME.split('/')
+                        env.REPO_NAME = parts[1]
+                        env.BRANCH_NAME = java.net.URLDecoder.decode(parts[2], "UTF-8")
                         env.TAG = "${env.REPO_NAME}-${env.BUILD_NUMBER}"
                         env.DOCKER_IMAGE = "drdocker108/${env.REPO_NAME}:${env.TAG}"
+
                         echo "Repo: ${env.REPO_NAME}, Branch: ${env.BRANCH_NAME}, ENV: ${params.ENVIRONMENT}"
+                        sh "git ls-remote https://github.com/vinay2727/${env.REPO_NAME}.git"
                     }
                 }
             }
 
-            stage('Checkout Source Repo') {
+            stage('Checkout') {
                 steps {
-                    git url: "https://github.com/vinay2727/${env.REPO_NAME}.git", branch: "${env.BRANCH_NAME}"
+                    checkout([
+                        $class: 'GitSCM',
+                        branches: [[name: "${env.BRANCH_NAME}"]],
+                        userRemoteConfigs: [[
+                            url: "https://github.com/vinay2727/${env.REPO_NAME}.git",
+                            credentialsId: 'github-creds'
+                        ]]
+                    ])
                 }
             }
 
-            stage('Checkout Central Config') {
-                steps {
-                    dir('central-config') {
-                        git url: 'https://github.com/vinay2727/jenkins.git', branch: 'main'
-                    }
-                }
-            }
-
-            stage('Build & Push (only in QA)') {
+            stage('Build & Push') {
                 when {
                     expression { params.ENVIRONMENT == 'qa' }
                 }
@@ -55,35 +56,27 @@ def call() {
                 }
             }
 
-            stage('Fetch QA Image Tag (only in Prod)') {
+            stage('Promote from QA') {
                 when {
                     expression { params.ENVIRONMENT == 'prod' }
                 }
                 steps {
                     script {
-                        def imageTag = sh(
-                            script: """
-                                kubectl --kubeconfig=${KUBECONFIG} -n qa get pods -l app=${env.REPO_NAME} -o jsonpath='{.items[0].spec.containers[0].image}'
-                            """,
+                        env.DOCKER_IMAGE = sh(
+                            script: "kubectl --kubeconfig=${KUBECONFIG} -n qa get pods -l app=${env.REPO_NAME} -o jsonpath='{.items[0].spec.containers[0].image}'",
                             returnStdout: true
                         ).trim()
-                        env.DOCKER_IMAGE = imageTag
-                        echo "Promoting image from QA: ${env.DOCKER_IMAGE}"
+                        echo "Using QA image: ${env.DOCKER_IMAGE}"
                     }
                 }
             }
 
-            stage('Deploy to Kubernetes') {
+            stage('Deploy') {
                 steps {
                     sh """
-                        echo "Using context: minikube"
                         kubectl --kubeconfig=${KUBECONFIG} config use-context minikube || true
-
-                        echo "Creating namespace ${params.ENVIRONMENT} if missing..."
                         kubectl --kubeconfig=${KUBECONFIG} create namespace ${params.ENVIRONMENT} --dry-run=client -o yaml | kubectl apply -f -
-
-                        echo "Deploying image: ${env.DOCKER_IMAGE} to ${params.ENVIRONMENT}"
-                        sed "s|<IMAGE_TAG>|${env.DOCKER_IMAGE}|g; s|<REPO_NAME>|${env.REPO_NAME}|g; s|<ENV>|${params.ENVIRONMENT}|g" central-config/k8s-deployment.yaml | \
+                        sed "s|<IMAGE_TAG>|${env.DOCKER_IMAGE}|g; s|<REPO_NAME>|${env.REPO_NAME}|g; s|<ENV>|${params.ENVIRONMENT}|g" k8s-deployment.yaml | \
                         kubectl --kubeconfig=${KUBECONFIG} apply -n ${params.ENVIRONMENT} -f -
                     """
                 }
@@ -91,5 +84,3 @@ def call() {
         }
     }
 }
-
-return this
