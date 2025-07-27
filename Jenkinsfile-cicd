@@ -11,6 +11,19 @@ pipeline {
     }
 
     stages {
+        stage('Pre-Deployment Approval') {
+            steps {
+                script {
+                    input(
+                        id: 'PreApproval',
+                        message: "🚦 Approval required to start deployment for '${params.ENVIRONMENT}' environment",
+                        ok: 'Proceed',
+                        submitter: 'vinay2727' // Jenkins usernames only
+                    )
+                }
+            }
+        }
+
         stage('Set Vars') {
             steps {
                 script {
@@ -66,7 +79,6 @@ pipeline {
             steps {
                 withCredentials([usernamePassword(credentialsId: 'dockerhub-creds', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
                     script {
-                        echo "🔍 Getting image name from QA namespace pod..."
                         def qaImage = sh(
                             script: """
                                 kubectl --kubeconfig=${KUBECONFIG} get pods -n qa -l app=${params.REPO_NAME} -o jsonpath='{.items[0].spec.containers[0].image}'
