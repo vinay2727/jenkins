@@ -11,7 +11,7 @@ def call() {
         }
 
         stages {
-            stage('Prepare') {
+            stage('Context Resolution') {
                 steps {
                     script {
                         def parts = env.JOB_NAME.split('/')
@@ -20,26 +20,26 @@ def call() {
                         env.TAG = "${env.REPO_NAME}-${env.BUILD_NUMBER}"
                         env.DOCKER_IMAGE = "drdocker108/${env.REPO_NAME}:${env.TAG}"
 
-                        echo "Repo: ${env.REPO_NAME}, Branch: ${env.BRANCH_NAME}, ENV: ${params.ENVIRONMENT}"
+                        echo "Repo: ${env.REPO_NAME}, Branch: ${env.BRANCH_NAME}, Tag: ${env.TAG}, ENV: ${params.ENVIRONMENT}"
                         sh "git ls-remote https://github.com/vinay2727/${env.REPO_NAME}.git"
                     }
                 }
             }
 
-            stage('Checkout') {
+            stage('Source Checkout') {
                 steps {
                     checkout([
                         $class: 'GitSCM',
                         branches: [[name: "${env.BRANCH_NAME}"]],
                         userRemoteConfigs: [[
                             url: "https://github.com/vinay2727/${env.REPO_NAME}.git",
-                            credentialsId: 'github-creds'
+                            credentialsId: 'Github-PAT'
                         ]]
                     ])
                 }
             }
 
-            stage('Build & Push') {
+            stage('Build & Push QA') {
                 when {
                     expression { params.ENVIRONMENT == 'qa' }
                 }
@@ -71,7 +71,7 @@ def call() {
                 }
             }
 
-            stage('Deploy') {
+            stage('Deploy to Kubernetes') {
                 steps {
                     sh """
                         kubectl --kubeconfig=${KUBECONFIG} config use-context minikube || true
@@ -84,3 +84,5 @@ def call() {
         }
     }
 }
+
+return this
