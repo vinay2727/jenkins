@@ -14,6 +14,15 @@ def call() {
         }
 
         stages {
+            stage('Approval') {
+                steps {
+                    script {
+                        timeout(time: 15, unit: 'MINUTES') {
+                            input message: "Approve deployment to ${params.ENVIRONMENT}?", ok: 'Proceed', submitter: 'vinay2727,qa-lead,pp-owner'
+                        }
+                    }
+                }
+            }
             stage('Init') {
                 steps {
                     script {
