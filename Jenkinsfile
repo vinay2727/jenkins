@@ -113,12 +113,12 @@ def call() {
                                 returnStdout: true
                             ).trim()
 
-                            if (prLabels.contains('qa')) {
+                            if (prLabels.contains('env/qa')) {
                                 env.TARGET_ENV = 'qa'
-                            } else if (prLabels.contains('prod')) {
+                            } else if (prLabels.contains('env/prod')) {
                                 env.TARGET_ENV = 'prod'
                             } else {
-                                error "❌ No valid deployment label found (qa/prod)"
+                                error "❌ No valid deployment label found (env/qa, env/prod)"
                             }
 
                             echo "🏷 Deployment label identified: ${env.TARGET_ENV}"
