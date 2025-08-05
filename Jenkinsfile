@@ -42,9 +42,9 @@ def call() {
                                     -Dsonar.projectName=${env.REPO_NAME} \
                                     -Dsonar.host.url=$SONAR_HOST_URL \
                                     -Dsonar.login=$SONAR_TOKEN \
-                                    -Dsonar.pullrequest.branch=${env.BRANCH_NAME} \
-                                    -Dsonar.pullrequest.github.repository=vinay2727/${env.REPO_NAME} \
-                                    -Dsonar.pullrequest.provider=GitHub
+                                    #-Dsonar.pullrequest.branch=${env.BRANCH_NAME} \
+                                    #-Dsonar.pullrequest.github.repository=vinay2727/${env.REPO_NAME} \
+                                    #-Dsonar.pullrequest.provider=GitHub
                             """
 
                             def ceTaskUrl = readFile('target/sonar/report-task.txt').split('\n')
