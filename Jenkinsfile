@@ -31,7 +31,7 @@ def call() {
                 }
                 steps {
                     withCredentials([
-                        string(credentialsId: 'Github-PAT', variable: 'GITHUB_TOKEN'),
+                        string(credentialsId: 'github-org-pat', variable: 'GITHUB_TOKEN'),
                         string(credentialsId: 'sonarqube-token', variable: 'SONAR_TOKEN'),
                         string(credentialsId: 'sonarqube-url', variable: 'SONAR_HOST_URL')
                     ]) {
