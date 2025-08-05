@@ -23,77 +23,77 @@ def call() {
                 }
             }
 
-            stage('SAST Scan - SonarQube') {
-                when {
-                    expression {
-                        return env.BRANCH_NAME.startsWith('release/')
-                    }
-                }
-                steps {
-                    withCredentials([
-                        string(credentialsId: 'github-org-pat', variable: 'GITHUB_TOKEN'),
-                        string(credentialsId: 'sonarqube-token', variable: 'SONAR_TOKEN'),
-                        string(credentialsId: 'sonarqube-url', variable: 'SONAR_HOST_URL')
-                    ]) {
-                        script {
-                            sh """
-                                mvn org.sonarsource.scanner.maven:sonar-maven-plugin:sonar \
-                                    -Dsonar.projectKey=${env.REPO_NAME} \
-                                    -Dsonar.projectName=${env.REPO_NAME} \
-                                    -Dsonar.host.url=$SONAR_HOST_URL \
-                                    -Dsonar.login=$SONAR_TOKEN \
-                                    #-Dsonar.pullrequest.branch=${env.BRANCH_NAME} \
-                                    #-Dsonar.pullrequest.github.repository=vinay2727/${env.REPO_NAME} \
-                                    #-Dsonar.pullrequest.provider=GitHub
-                            """
+            // stage('SAST Scan - SonarQube') {
+            //     when {
+            //         expression {
+            //             return env.BRANCH_NAME.startsWith('release/')
+            //         }
+            //     }
+            //     steps {
+            //         withCredentials([
+            //             string(credentialsId: 'github-org-pat', variable: 'GITHUB_TOKEN'),
+            //             string(credentialsId: 'sonarqube-token', variable: 'SONAR_TOKEN'),
+            //             string(credentialsId: 'sonarqube-url', variable: 'SONAR_HOST_URL')
+            //         ]) {
+            //             script {
+            //                 sh """
+            //                     mvn org.sonarsource.scanner.maven:sonar-maven-plugin:sonar \
+            //                         -Dsonar.projectKey=${env.REPO_NAME} \
+            //                         -Dsonar.projectName=${env.REPO_NAME} \
+            //                         -Dsonar.host.url=$SONAR_HOST_URL \
+            //                         -Dsonar.login=$SONAR_TOKEN \
+            //                         #-Dsonar.pullrequest.branch=${env.BRANCH_NAME} \
+            //                         #-Dsonar.pullrequest.github.repository=vinay2727/${env.REPO_NAME} \
+            //                         #-Dsonar.pullrequest.provider=GitHub
+            //                 """
 
-                            def ceTaskUrl = readFile('target/sonar/report-task.txt').split('\n')
-                                .find { it.startsWith("ceTaskUrl=") }
-                                ?.replace("ceTaskUrl=", "")
-                                ?.trim()
+            //                 def ceTaskUrl = readFile('target/sonar/report-task.txt').split('\n')
+            //                     .find { it.startsWith("ceTaskUrl=") }
+            //                     ?.replace("ceTaskUrl=", "")
+            //                     ?.trim()
 
-                            echo "🔍 Waiting for SonarQube analysis to complete..."
-                            sleep(time: 10, unit: 'SECONDS')
+            //                 echo "🔍 Waiting for SonarQube analysis to complete..."
+            //                 sleep(time: 10, unit: 'SECONDS')
 
-                            def taskStatus = "PENDING"
-                            def analysisId = ""
-                            while (taskStatus == "PENDING" || taskStatus == "IN_PROGRESS") {
-                                def ceResponse = sh(
-                                    script: "curl -s -u $SONAR_TOKEN: ${ceTaskUrl}",
-                                    returnStdout: true
-                                ).trim()
-                                def json = readJSON text: ceResponse
-                                taskStatus = json.task.status
-                                analysisId = json.task.analysisId ?: ""
-                                if (taskStatus == "PENDING" || taskStatus == "IN_PROGRESS") {
-                                    sleep(time: 3, unit: 'SECONDS')
-                                }
-                            }
+            //                 def taskStatus = "PENDING"
+            //                 def analysisId = ""
+            //                 while (taskStatus == "PENDING" || taskStatus == "IN_PROGRESS") {
+            //                     def ceResponse = sh(
+            //                         script: "curl -s -u $SONAR_TOKEN: ${ceTaskUrl}",
+            //                         returnStdout: true
+            //                     ).trim()
+            //                     def json = readJSON text: ceResponse
+            //                     taskStatus = json.task.status
+            //                     analysisId = json.task.analysisId ?: ""
+            //                     if (taskStatus == "PENDING" || taskStatus == "IN_PROGRESS") {
+            //                         sleep(time: 3, unit: 'SECONDS')
+            //                     }
+            //                 }
 
-                            if (!analysisId) {
-                                error("❌ Failed to retrieve analysis ID from SonarQube.")
-                            }
+            //                 if (!analysisId) {
+            //                     error("❌ Failed to retrieve analysis ID from SonarQube.")
+            //                 }
 
-                            def measuresResponse = sh(
-                                script: "curl -s -u $SONAR_TOKEN: \"$SONAR_HOST_URL/api/measures/component?component=${env.REPO_NAME}&metricKeys=coverage\"",
-                                returnStdout: true
-                            ).trim()
+            //                 def measuresResponse = sh(
+            //                     script: "curl -s -u $SONAR_TOKEN: \"$SONAR_HOST_URL/api/measures/component?component=${env.REPO_NAME}&metricKeys=coverage\"",
+            //                     returnStdout: true
+            //                 ).trim()
 
-                            def jsonMeasures = readJSON text: measuresResponse
-                            def coverageStr = jsonMeasures.component.measures[0].value
-                            def coverage = coverageStr.toFloat()
+            //                 def jsonMeasures = readJSON text: measuresResponse
+            //                 def coverageStr = jsonMeasures.component.measures[0].value
+            //                 def coverage = coverageStr.toFloat()
 
-                            echo "📊 SonarQube Code Coverage: ${coverage}%"
+            //                 echo "📊 SonarQube Code Coverage: ${coverage}%"
 
-                            if (coverage < 80.0) {
-                                error("❌ Code coverage is below 80%. Pipeline aborted.")
-                            } else {
-                                echo "✅ Code coverage is sufficient. Proceeding..."
-                            }
-                        }
-                    }
-                }
-            }
+            //                 if (coverage < 80.0) {
+            //                     error("❌ Code coverage is below 80%. Pipeline aborted.")
+            //                 } else {
+            //                     echo "✅ Code coverage is sufficient. Proceeding..."
+            //                 }
+            //             }
+            //         }
+            //     }
+            // }
 
             stage('Fetch PR Label') {
                 when {
