@@ -102,7 +102,7 @@ def call() {
                     }
                 }
                 steps {
-                    withCredentials([string(credentialsId: 'Github-PAT', variable: 'GITHUB_TOKEN')]) {
+                    withCredentials([string(credentialsId: 'github-org-pat', variable: 'GITHUB_TOKEN')]) {
                         script {
                             def prLabels = sh(
                                 script: """
